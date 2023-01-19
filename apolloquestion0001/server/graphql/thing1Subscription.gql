@@ -1,0 +1,6 @@
+subscription thing1Subscription {
+  thing1Subscription {
+    id,
+    description
+  }
+}
