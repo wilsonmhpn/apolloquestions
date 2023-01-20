@@ -3,21 +3,15 @@ A directive used by the Apollo iOS client to annotate operations or fragments th
 """
 directive @apollo_client_ios_localCacheMutation on QUERY | MUTATION | SUBSCRIPTION | FRAGMENT_DEFINITION
 
-type Thing1 {
-  id: ID!
-  description: String!
-}
-
-type Thing2 {
+type Thing {
   id: ID!
   description: String!
 }
 
 type Query {
-  _dummy: String
+  thingById(id: ID!): Thing!
 }
 
-type Subscription {
-  thing1Subscription: Thing1!
-  thing2Subscription: Thing2!
+type Mutation {
+  createThing(id: ID!): Thing!
 }

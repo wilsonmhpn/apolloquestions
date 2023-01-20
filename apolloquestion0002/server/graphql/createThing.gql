@@ -1,0 +1,6 @@
+mutation createThing($id: ID!) {
+  createThing(id: $id) {
+    id,
+    description
+  }
+}

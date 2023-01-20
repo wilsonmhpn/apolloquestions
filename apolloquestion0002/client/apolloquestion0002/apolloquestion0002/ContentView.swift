@@ -8,8 +8,20 @@ import ApolloAPI
 import ApolloWebSocket
 import SwiftCodeGeneratedByApollo
 
-// NB: Code below connects to http://localhost:4000/graphql so the app should be run in the simulator on the same machine where the graphql server is running
-// NB: Set breakpoints as indicated by SET BREAKPOINT HERE below to catch the issue in action
+class ClosureDeallocDetector {
+    let description: String
+    public var closureWasRun = false
+
+    init(_ description: String) {
+        self.description = description
+    }
+    deinit {
+        if !closureWasRun {
+            // SET A BREAKPOINT HERE TO SEE THE PROBLEM
+            print("ClosureDeallocDetector: Closure for \(description) was deallocated without being run; anything waiting for success or failure will never know")
+        }
+    }
+}
 
 class AppController: ObservableObject, WebSocketTransportDelegate {
 
@@ -25,11 +37,11 @@ class AppController: ObservableObject, WebSocketTransportDelegate {
     var webSocketTransport: WebSocketTransport?
     var apolloGraphQLConn: ApolloClient?
 
-    var thing1SubscriptionCancellable: Apollo.Cancellable?
-    @Published var thing1SubscriptionState: OperationState = .notStarted
+    var fetchCancellable: Apollo.Cancellable?
+    @Published var fetchState: OperationState = .notStarted
 
-    var thing2SubscriptionCancellable: Apollo.Cancellable?
-    @Published var thing2SubscriptionState: OperationState = .notStarted
+    var mutationCancellable: Apollo.Cancellable?
+    @Published var mutationState: OperationState = .notStarted
 
     func createApolloConnection (wsUrl: URL)
     -> (webSocketTransport: WebSocketTransport, client: ApolloClient?) {
@@ -51,33 +63,33 @@ class AppController: ObservableObject, WebSocketTransportDelegate {
         return (webSocketTransport, apolloClient)
     }
 
-    func handleThing1Result(_ result: Result<GraphQLResult<Thing1Subscription.Data>, any Error>) {
+    func handleFetchResult(_ result: Result<GraphQLResult<ThingByIdQuery.Data>, any Error>) {
         switch result {
             case let .success(graphQLResult):
-                //print("AppController: handleThing1Result success \(graphQLResult)")
-                thing1SubscriptionState = .success("\(graphQLResult.data?.thing1Subscription.id ?? "nil")")
+                print("AppController: handleFetchResult success \(graphQLResult)")
+                fetchState = .success("\(graphQLResult.data?.thingById.id ?? "nil")")
             case let .failure(e):
-                print("AppController: handleThing1Result network error \(e)")
-                thing1SubscriptionState = .networkFailure // SET BREAKPOINT HERE
+                print("AppController: handleFetchResult network error \(e)")
+                fetchState = .networkFailure
         }
     }
 
-    func handleThing2Result(_ result: Result<GraphQLResult<Thing2Subscription.Data>, any Error>) {
+    func handleMutationResult(_ result: Result<GraphQLResult<CreateThingMutation.Data>, any Error>) {
         switch result {
             case let .success(graphQLResult):
-                //print("AppController: handleThing2Result success \(graphQLResult)")
-                thing2SubscriptionState = .success("\(graphQLResult.data?.thing2Subscription.id ?? "nil")")
+                print("AppController: handleMutationResult success \(graphQLResult)")
+                mutationState = .success("\(graphQLResult.data?.createThing.id ?? "nil")")
             case let .failure(e):
-                print("AppController: handleThing2Result network error \(e)")
-                thing2SubscriptionState = .networkFailure // SET BREAKPOINT HERE
+                print("AppController: handleMutationResult network error \(e)")
+                mutationState = .networkFailure
         }
     }
 
     func connectAndRunOperations(_ wsUrl: String) {
-        //print("AppController: connectAndRunOperations \(wsUrl)")
+        print("AppController: connectAndRunOperations \(wsUrl)")
 
-        thing1SubscriptionState = .pending
-        thing2SubscriptionState = .pending
+        fetchState = .pending
+        mutationState = .pending
         showConnect = false
 
         let wsUrl = URL(string: wsUrl)
@@ -85,28 +97,31 @@ class AppController: ObservableObject, WebSocketTransportDelegate {
         apolloGraphQLConn = connInfo.client
         webSocketTransport = connInfo.webSocketTransport
 
-        thing1SubscriptionCancellable = apolloGraphQLConn?.subscribe(
-            subscription: SwiftCodeGeneratedByApollo.Thing1Subscription()) { result in
-                self.handleThing1Result(result)
-            }
+        // ID for fetch doesn't matter, server just returns a Thing with that ID
+        let fetchClosureDeallocDetector = ClosureDeallocDetector("fetch")
+        fetchCancellable = apolloGraphQLConn?.fetch(
+            query: SwiftCodeGeneratedByApollo.ThingByIdQuery(
+                id: String(UUID().uuidString.prefix(8)))) { result in
+                    fetchClosureDeallocDetector.closureWasRun = true
+                    self.handleFetchResult(result)
+                }
 
-        thing2SubscriptionCancellable = apolloGraphQLConn?.subscribe(
-            subscription: SwiftCodeGeneratedByApollo.Thing2Subscription()) { result in
-                self.handleThing2Result(result)
-            }
+        // ID for mutation doesn't matter, server just returns a Thing with that ID
+        let mutationClosureDeallocDetector = ClosureDeallocDetector("mutation")
+        mutationCancellable = apolloGraphQLConn?.perform(
+            mutation: SwiftCodeGeneratedByApollo.CreateThingMutation(
+                id: String(UUID().uuidString.prefix(8)))) { result in
+                    mutationClosureDeallocDetector.closureWasRun = true
+                    self.handleMutationResult(result)
+                }
 
-    }
-
-    func cancelThing2Subscription() {
-        thing2SubscriptionCancellable?.cancel()
-        thing2SubscriptionCancellable = nil
     }
 
     func cancelOperationsAndDisconnect() {
-        thing1SubscriptionCancellable?.cancel()
-        thing1SubscriptionCancellable = nil
-        thing2SubscriptionCancellable?.cancel()
-        thing2SubscriptionCancellable = nil
+        fetchCancellable?.cancel()
+        fetchCancellable = nil
+        mutationCancellable?.cancel()
+        mutationCancellable = nil
         webSocketTransport?.closeConnection()
         webSocketTransport = nil
         apolloGraphQLConn = nil
@@ -132,8 +147,8 @@ struct ContentView: View {
     var body: some View {
         VStack {
             Spacer()
-            Text("Thing1: \(String(describing: appController.thing1SubscriptionState))")
-            Text("Thing2: \(String(describing: appController.thing2SubscriptionState))")
+            Text("Fetch state: \(String(describing: appController.fetchState))")
+            Text("Mutation state: \(String(describing: appController.mutationState))")
             Spacer()
             if appController.showConnect {
                 Button("Connect and Run Operations") {
@@ -145,9 +160,6 @@ struct ContentView: View {
                 VStack {
                     Button("Cancel operations and disconnect") {
                         appController.cancelOperationsAndDisconnect()
-                    }
-                    Button("Cancel Thing2 subscription") {
-                        appController.cancelThing2Subscription()
                     }
                 }
             }

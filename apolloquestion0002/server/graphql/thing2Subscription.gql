@@ -1,6 +1,0 @@
-subscription thing2Subscription {
-  thing2Subscription {
-    id,
-    description
-  }
-}

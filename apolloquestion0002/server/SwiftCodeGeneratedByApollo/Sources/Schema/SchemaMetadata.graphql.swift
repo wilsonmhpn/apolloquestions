@@ -22,9 +22,9 @@ public enum SchemaMetadata: ApolloAPI.SchemaMetadata {
 
   public static func objectType(forTypename typename: String) -> Object? {
     switch typename {
-    case "Subscription": return SwiftCodeGeneratedByApollo.Objects.Subscription
-    case "Thing1": return SwiftCodeGeneratedByApollo.Objects.Thing1
-    case "Thing2": return SwiftCodeGeneratedByApollo.Objects.Thing2
+    case "Mutation": return SwiftCodeGeneratedByApollo.Objects.Mutation
+    case "Thing": return SwiftCodeGeneratedByApollo.Objects.Thing
+    case "Query": return SwiftCodeGeneratedByApollo.Objects.Query
     default: return nil
     }
   }

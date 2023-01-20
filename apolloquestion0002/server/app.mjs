@@ -27,34 +27,37 @@ import { PubSub } from 'graphql-subscriptions';
 const pubsub = new PubSub();
 
 const typeDefs = gql`
-type Thing1 {
-  id: ID!
-  description: String!
-}
-
-type Thing2 {
+type Thing {
   id: ID!
   description: String!
 }
 
 type Query {
-  _dummy: String
+  thingById(id: ID!): Thing!
 }
 
-type Subscription {
-  thing1Subscription: Thing1!
-  thing2Subscription: Thing2!
+type Mutation {
+  createThing(id: ID!): Thing!
 }
 
 `;
 
 const resolvers = {
-  Subscription: {
-    thing1Subscription: {
-      subscribe: () => pubsub.asyncIterator(['Thing1']),
+  Mutation: {
+    createThing(_, { id }, __) {
+      const thing = {
+        id,
+        description: "Created via createThing mutation"
+      }
+      return thing;
     },
-    thing2Subscription: {
-      subscribe: () => pubsub.asyncIterator(['Thing2']),
+  },
+  Query: {
+    thingById: (_, { id }, __) => {
+      return {
+        id,
+        description: "Created as response to query"
+      }
     },
   },
 };
@@ -96,19 +99,3 @@ httpServer.listen(PORT, () => {
   console.log(`Server is now running on http://localhost:${PORT}/graphql`);
 });
 
-var timerCount = 0
-setInterval(() => {
-  timerCount += 1
-  pubsub.publish('Thing1', {
-    thing1Subscription: {
-      id: "Thing1_" + timerCount,
-      description: "Created via thing1Subscription"
-    }
-  });
-  pubsub.publish('Thing2', {
-    thing2Subscription: {
-      id: "Thing2_" + timerCount,
-      description: "Created via thing2Subscription"
-    }
-  });
-}, 1);

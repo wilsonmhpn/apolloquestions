@@ -3,13 +3,13 @@
 
 @_exported import ApolloAPI
 
-public class Thing1Subscription: GraphQLSubscription {
-  public static let operationName: String = "thing1Subscription"
+public class ThingByIdQuery: GraphQLQuery {
+  public static let operationName: String = "thingById"
   public static let document: ApolloAPI.DocumentType = .notPersisted(
     definition: .init(
       #"""
-      subscription thing1Subscription {
-        thing1Subscription {
+      query thingById($id: ID!) {
+        thingById(id: $id) {
           __typename
           id
           description
@@ -18,27 +18,33 @@ public class Thing1Subscription: GraphQLSubscription {
       """#
     ))
 
-  public init() {}
+  public var id: ID
+
+  public init(id: ID) {
+    self.id = id
+  }
+
+  public var __variables: Variables? { ["id": id] }
 
   public struct Data: SwiftCodeGeneratedByApollo.SelectionSet {
     public let __data: DataDict
     public init(data: DataDict) { __data = data }
 
-    public static var __parentType: ApolloAPI.ParentType { SwiftCodeGeneratedByApollo.Objects.Subscription }
+    public static var __parentType: ApolloAPI.ParentType { SwiftCodeGeneratedByApollo.Objects.Query }
     public static var __selections: [ApolloAPI.Selection] { [
-      .field("thing1Subscription", Thing1Subscription.self),
+      .field("thingById", ThingById.self, arguments: ["id": .variable("id")]),
     ] }
 
-    public var thing1Subscription: Thing1Subscription { __data["thing1Subscription"] }
+    public var thingById: ThingById { __data["thingById"] }
 
-    /// Thing1Subscription
+    /// ThingById
     ///
-    /// Parent Type: `Thing1`
-    public struct Thing1Subscription: SwiftCodeGeneratedByApollo.SelectionSet {
+    /// Parent Type: `Thing`
+    public struct ThingById: SwiftCodeGeneratedByApollo.SelectionSet {
       public let __data: DataDict
       public init(data: DataDict) { __data = data }
 
-      public static var __parentType: ApolloAPI.ParentType { SwiftCodeGeneratedByApollo.Objects.Thing1 }
+      public static var __parentType: ApolloAPI.ParentType { SwiftCodeGeneratedByApollo.Objects.Thing }
       public static var __selections: [ApolloAPI.Selection] { [
         .field("id", SwiftCodeGeneratedByApollo.ID.self),
         .field("description", String.self),
