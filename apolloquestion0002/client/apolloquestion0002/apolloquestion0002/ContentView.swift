@@ -8,40 +8,11 @@ import ApolloAPI
 import ApolloWebSocket
 import SwiftCodeGeneratedByApollo
 
-class ClosureDeallocDetector {
-    let description: String
-    public var closureWasRun = false
-
-    init(_ description: String) {
-        self.description = description
-    }
-    deinit {
-        if !closureWasRun {
-            // SET A BREAKPOINT HERE TO SEE THE PROBLEM
-            print("ClosureDeallocDetector: Closure for \(description) was deallocated without being run; anything waiting for success or failure will never know")
-        }
-    }
-}
-
 class AppController: ObservableObject, WebSocketTransportDelegate {
-
-    enum OperationState {
-        case notStarted
-        case pending
-        case success(String)
-        case networkFailure
-        case failure
-    }
-
-    @Published var showConnect = true
     var webSocketTransport: WebSocketTransport?
     var apolloGraphQLConn: ApolloClient?
-
-    var fetchCancellable: Apollo.Cancellable?
-    @Published var fetchState: OperationState = .notStarted
-
-    var mutationCancellable: Apollo.Cancellable?
-    @Published var mutationState: OperationState = .notStarted
+    @Published var fetchReturnedResult = false
+    @Published var mutationReturnedResult = false
 
     func createApolloConnection (wsUrl: URL)
     -> (webSocketTransport: WebSocketTransport, client: ApolloClient?) {
@@ -63,69 +34,82 @@ class AppController: ObservableObject, WebSocketTransportDelegate {
         return (webSocketTransport, apolloClient)
     }
 
-    func handleFetchResult(_ result: Result<GraphQLResult<ThingByIdQuery.Data>, any Error>) {
-        switch result {
-            case let .success(graphQLResult):
-                print("AppController: handleFetchResult success \(graphQLResult)")
-                fetchState = .success("\(graphQLResult.data?.thingById.id ?? "nil")")
-            case let .failure(e):
-                print("AppController: handleFetchResult network error \(e)")
-                fetchState = .networkFailure
-        }
-    }
-
-    func handleMutationResult(_ result: Result<GraphQLResult<CreateThingMutation.Data>, any Error>) {
-        switch result {
-            case let .success(graphQLResult):
-                print("AppController: handleMutationResult success \(graphQLResult)")
-                mutationState = .success("\(graphQLResult.data?.createThing.id ?? "nil")")
-            case let .failure(e):
-                print("AppController: handleMutationResult network error \(e)")
-                mutationState = .networkFailure
-        }
-    }
-
-    func connectAndRunOperations(_ wsUrl: String) {
-        print("AppController: connectAndRunOperations \(wsUrl)")
-
-        fetchState = .pending
-        mutationState = .pending
-        showConnect = false
-
-        let wsUrl = URL(string: wsUrl)
-        let connInfo = createApolloConnection(wsUrl: wsUrl!)
+    func connect (_ wsUrl: URL) {
+        print("AppController: connect \(wsUrl)")
+        let connInfo = createApolloConnection(wsUrl: wsUrl)
         apolloGraphQLConn = connInfo.client
         webSocketTransport = connInfo.webSocketTransport
-
-        // ID for fetch doesn't matter, server just returns a Thing with that ID
-        let fetchClosureDeallocDetector = ClosureDeallocDetector("fetch")
-        fetchCancellable = apolloGraphQLConn?.fetch(
-            query: SwiftCodeGeneratedByApollo.ThingByIdQuery(
-                id: String(UUID().uuidString.prefix(8)))) { result in
-                    fetchClosureDeallocDetector.closureWasRun = true
-                    self.handleFetchResult(result)
-                }
-
-        // ID for mutation doesn't matter, server just returns a Thing with that ID
-        let mutationClosureDeallocDetector = ClosureDeallocDetector("mutation")
-        mutationCancellable = apolloGraphQLConn?.perform(
-            mutation: SwiftCodeGeneratedByApollo.CreateThingMutation(
-                id: String(UUID().uuidString.prefix(8)))) { result in
-                    mutationClosureDeallocDetector.closureWasRun = true
-                    self.handleMutationResult(result)
-                }
-
     }
 
-    func cancelOperationsAndDisconnect() {
-        fetchCancellable?.cancel()
-        fetchCancellable = nil
-        mutationCancellable?.cancel()
-        mutationCancellable = nil
-        webSocketTransport?.closeConnection()
-        webSocketTransport = nil
-        apolloGraphQLConn = nil
-        showConnect = true
+    public class ClosureIsGoneDetector {
+        public var closureCalled = false
+        let infoString: String
+
+        init(_ infoString: String) {
+            self.infoString = infoString
+        }
+
+        deinit {
+            if !closureCalled {
+                print("deinit on \(infoString) BUT CLOSURE WAS NOT CALLED")
+            }
+            else {
+                print("deinit on \(infoString) AND CLOSURE WAS CALLED")
+            }
+        }
+    }
+
+    static func ifNotCancelled(_ closure: () -> ()) {
+        do {
+            try Task.checkCancellation()
+            closure()
+        }
+        catch {
+            print("cancelled!")
+        }
+    }
+
+    @MainActor
+    func fetchThingById(thingId: String) async -> Bool {
+        var apolloCancellable: Apollo.Cancellable?
+        return await withTaskCancellationHandler { [apolloCancellable] in
+            apolloCancellable?.cancel()
+        } operation: {
+            await withCheckedContinuation { theContinuation in
+                let closureIsGoneDetector = ClosureIsGoneDetector("fetchThingById")
+                Self.ifNotCancelled {
+                    apolloCancellable = self.apolloGraphQLConn?.fetch(
+                        query: SwiftCodeGeneratedByApollo.ThingByIdQuery(
+                            id: thingId)) { result in
+                                self.fetchReturnedResult = true
+                                closureIsGoneDetector.closureCalled = true
+                                theContinuation.resume(returning: true)
+                            }
+                    // TODO artificially repro the problem apolloCancellable!.cancel()
+                }
+            }
+        }
+    }
+
+    @MainActor
+    func createThing(thingId: String) async -> Bool{
+        var apolloCancellable: Apollo.Cancellable?
+        return await withTaskCancellationHandler { [apolloCancellable] in
+            apolloCancellable?.cancel()
+        } operation: {
+            await withCheckedContinuation { theContinuation in
+                let closureIsGoneDetector = ClosureIsGoneDetector("createThing")
+                Self.ifNotCancelled {
+                    apolloCancellable = self.apolloGraphQLConn?.perform(
+                        mutation: SwiftCodeGeneratedByApollo.CreateThingMutation(
+                            id: thingId)) { result in
+                                self.mutationReturnedResult = true
+                                closureIsGoneDetector.closureCalled = true
+                                theContinuation.resume(returning: true)
+                            }
+                }
+            }
+        }
     }
 
     public func webSocketTransportDidConnect(_ webSocketTransport: WebSocketTransport) {
@@ -147,24 +131,19 @@ struct ContentView: View {
     var body: some View {
         VStack {
             Spacer()
-            Text("Fetch state: \(String(describing: appController.fetchState))")
-            Text("Mutation state: \(String(describing: appController.mutationState))")
-            Spacer()
-            if appController.showConnect {
-                Button("Connect and Run Operations") {
-                    appController.connectAndRunOperations("ws://localhost:4000/graphql")
-                }
-                Text("")
-            }
-            else {
-                VStack {
-                    Button("Cancel operations and disconnect") {
-                        appController.cancelOperationsAndDisconnect()
-                    }
-                }
-            }
+            Text("fetchReturnedResult: \(appController.fetchReturnedResult ? "true" : "false")")
+            Text("mutationReturnedResult: \(appController.mutationReturnedResult ? "true" : "false")")
             Spacer()
         }
+        .onAppear {
+            appController.connect(URL(string: "ws://localhost:4000/graphql")!)
+            Task {
+                await appController.fetchThingById(thingId: "idToFetch")
+            }
+            Task {
+                await appController.createThing(thingId: "idToCreate")
+            }
+          }
         .padding()
     }
 }
