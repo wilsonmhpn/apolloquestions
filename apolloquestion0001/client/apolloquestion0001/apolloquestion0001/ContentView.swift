@@ -1,6 +1,3 @@
-// If the connect/disconnect is toggled at a fast enough pace, eventually a closure for an operation will be deallocated without ever being run
-// See "SET A BREAKPOINT HERE TO SEE THE PROBLEM" below...
-
 import SwiftUI
 
 import Apollo
