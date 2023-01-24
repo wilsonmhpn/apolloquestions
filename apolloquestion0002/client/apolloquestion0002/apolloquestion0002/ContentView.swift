@@ -1,6 +1,3 @@
-// If the connect/disconnect is toggled at a fast enough pace, eventually a closure for an operation will be deallocated without ever being run
-// See "SET A BREAKPOINT HERE TO SEE THE PROBLEM" below...
-
 import SwiftUI
 
 import Apollo
@@ -8,11 +5,36 @@ import ApolloAPI
 import ApolloWebSocket
 import SwiftCodeGeneratedByApollo
 
+
+public class ClosureIsGoneDetector {
+    public var closureCalled = false
+    let infoString: String
+
+    init(_ infoString: String) {
+        self.infoString = infoString
+    }
+
+    deinit {
+        if !closureCalled {
+            print("deinit on \(infoString) BUT CLOSURE WAS NOT CALLED")
+        }
+        else {
+            print("deinit on \(infoString) AND CLOSURE WAS CALLED")
+        }
+    }
+}
+
 class AppController: ObservableObject, WebSocketTransportDelegate {
+
+    @Published var showConnect = true
     var webSocketTransport: WebSocketTransport?
     var apolloGraphQLConn: ApolloClient?
-    @Published var fetchReturnedResult = false
-    @Published var mutationReturnedResult = false
+
+    var createThingCancellable: Apollo.Cancellable?
+    @Published var createThingState = false
+
+    var fetchThingCancellable: Apollo.Cancellable?
+    @Published var fetchThingState = false
 
     func createApolloConnection (wsUrl: URL)
     -> (webSocketTransport: WebSocketTransport, client: ApolloClient?) {
@@ -34,82 +56,47 @@ class AppController: ObservableObject, WebSocketTransportDelegate {
         return (webSocketTransport, apolloClient)
     }
 
-    func connect (_ wsUrl: URL) {
-        print("AppController: connect \(wsUrl)")
-        let connInfo = createApolloConnection(wsUrl: wsUrl)
+    func connectAndRunOperations(_ wsUrl: String) {
+        //print("AppController: connectAndRunOperations \(wsUrl)")
+
+        showConnect = false
+
+        let wsUrl = URL(string: wsUrl)
+        let connInfo = createApolloConnection(wsUrl: wsUrl!)
         apolloGraphQLConn = connInfo.client
         webSocketTransport = connInfo.webSocketTransport
-    }
 
-    public class ClosureIsGoneDetector {
-        public var closureCalled = false
-        let infoString: String
-
-        init(_ infoString: String) {
-            self.infoString = infoString
-        }
-
-        deinit {
-            if !closureCalled {
-                print("deinit on \(infoString) BUT CLOSURE WAS NOT CALLED")
-            }
-            else {
-                print("deinit on \(infoString) AND CLOSURE WAS CALLED")
-            }
-        }
-    }
-
-    static func ifNotCancelled(_ closure: () -> ()) {
-        do {
-            try Task.checkCancellation()
-            closure()
-        }
-        catch {
-            print("cancelled!")
-        }
-    }
-
-    @MainActor
-    func fetchThingById(thingId: String) async -> Bool {
-        var apolloCancellable: Apollo.Cancellable?
-        return await withTaskCancellationHandler { [apolloCancellable] in
-            apolloCancellable?.cancel()
-        } operation: {
-            await withCheckedContinuation { theContinuation in
-                let closureIsGoneDetector = ClosureIsGoneDetector("fetchThingById")
-                Self.ifNotCancelled {
-                    apolloCancellable = self.apolloGraphQLConn?.fetch(
-                        query: SwiftCodeGeneratedByApollo.ThingByIdQuery(
-                            id: thingId)) { result in
-                                self.fetchReturnedResult = true
-                                closureIsGoneDetector.closureCalled = true
-                                theContinuation.resume(returning: true)
-                            }
-                    // TODO artificially repro the problem apolloCancellable!.cancel()
+        let closureIsGoneDetector1 = ClosureIsGoneDetector("fetchThingCancellable")
+        fetchThingCancellable = self.apolloGraphQLConn?.fetch(
+            query: SwiftCodeGeneratedByApollo.ThingByIdQuery(
+                id: "does_not_matter_1")) { result in
+                    if !closureIsGoneDetector1.closureCalled {
+                        closureIsGoneDetector1.closureCalled = true
+                    }
                 }
-            }
-        }
+
+        let closureIsGoneDetector2 = ClosureIsGoneDetector("createThingCancellable")
+        createThingCancellable = self.apolloGraphQLConn?.perform(
+            mutation: SwiftCodeGeneratedByApollo.CreateThingMutation(
+                id: "does_not_matter_2")) { result in
+                    if !closureIsGoneDetector2.closureCalled {
+                        closureIsGoneDetector2.closureCalled = true
+                    }
+                }
+
     }
 
-    @MainActor
-    func createThing(thingId: String) async -> Bool{
-        var apolloCancellable: Apollo.Cancellable?
-        return await withTaskCancellationHandler { [apolloCancellable] in
-            apolloCancellable?.cancel()
-        } operation: {
-            await withCheckedContinuation { theContinuation in
-                let closureIsGoneDetector = ClosureIsGoneDetector("createThing")
-                Self.ifNotCancelled {
-                    apolloCancellable = self.apolloGraphQLConn?.perform(
-                        mutation: SwiftCodeGeneratedByApollo.CreateThingMutation(
-                            id: thingId)) { result in
-                                self.mutationReturnedResult = true
-                                closureIsGoneDetector.closureCalled = true
-                                theContinuation.resume(returning: true)
-                            }
-                }
-            }
-        }
+    func cancelOperationsAndDisconnect() {
+        createThingState = false
+        fetchThingState = false
+        createThingCancellable?.cancel()
+        createThingCancellable = nil
+        fetchThingCancellable?.cancel()
+        fetchThingCancellable = nil
+        webSocketTransport?.closeConnection()
+        webSocketTransport = nil
+        apolloGraphQLConn = nil
+        showConnect = true
     }
 
     public func webSocketTransportDidConnect(_ webSocketTransport: WebSocketTransport) {
@@ -131,19 +118,25 @@ struct ContentView: View {
     var body: some View {
         VStack {
             Spacer()
-            Text("fetchReturnedResult: \(appController.fetchReturnedResult ? "true" : "false")")
-            Text("mutationReturnedResult: \(appController.mutationReturnedResult ? "true" : "false")")
+            Text("createThingState: \(appController.createThingState ? "true" : "false")")
+            Text("fetchThingState: \(appController.fetchThingState ? "true" : "false")")
+            Spacer()
+            if appController.showConnect {
+                Button("Connect and Run Operations") {
+                    appController.connectAndRunOperations("ws://localhost:4000/graphql")
+                }
+                Text("")
+            }
+            else {
+                VStack {
+                    Button("Cancel operations and disconnect") {
+                        appController.cancelOperationsAndDisconnect()
+                    }
+                }
+            }
             Spacer()
         }
-        .onAppear {
-            appController.connect(URL(string: "ws://localhost:4000/graphql")!)
-            Task {
-                await appController.fetchThingById(thingId: "idToFetch")
-            }
-            Task {
-                await appController.createThing(thingId: "idToCreate")
-            }
-          }
         .padding()
     }
 }
+
