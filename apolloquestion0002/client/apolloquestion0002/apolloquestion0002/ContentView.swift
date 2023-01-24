@@ -78,6 +78,8 @@ class AppController: ObservableObject {
                                     continuation.resume(returning: "asyncFetch closure called")
                                 }
                             }
+                    print("Dump for fetchCancellable:")
+                    dump(fetchCancellable)
                 }
                 catch {}
             }
@@ -86,17 +88,17 @@ class AppController: ObservableObject {
 
     //@MainActor // This *seems* to mitigate the issue - the usage of the main thread *seems* to propagate to the closure following withCheckedContinuation... is this by design or a coincidence?  In any case if all Apollo operations are initiated on the main thread, then no collision on sequence IDs should be possible
     func asyncPerform() async -> String {
-        var fetchCancellable: Apollo.Cancellable?
+        var performCancellable: Apollo.Cancellable?
         //print("asyncPerform called on \(Thread.current)")
-        return await withTaskCancellationHandler { [fetchCancellable] in
-            fetchCancellable?.cancel()
+        return await withTaskCancellationHandler { [performCancellable] in
+            performCancellable?.cancel()
         } operation: {
             return await withCheckedContinuation { continuation in
                 print("asyncPerform withCheckedContinuation called on \(Thread.current)")
-                let closureIsGoneDetector = ClosureIsGoneDetector("fetchCancellable")
+                let closureIsGoneDetector = ClosureIsGoneDetector("performCancellable")
                 do {
                     try Task.checkCancellation()
-                    fetchCancellable = self.apolloGraphQLConn?.perform(
+                    performCancellable = self.apolloGraphQLConn?.perform(
                         mutation: SwiftCodeGeneratedByApollo.CreateThingMutation(
                             id: "does_not_matter_2")) { result in
                                 print("asyncPerform perform closure called on \(Thread.current)")
@@ -105,6 +107,8 @@ class AppController: ObservableObject {
                                     continuation.resume(returning: "asyncPerform closure called")
                                 }
                             }
+                    print("Dump for performCancellable:")
+                    dump(performCancellable)
                 }
                 catch {}
             }
