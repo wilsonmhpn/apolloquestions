@@ -1,0 +1,6 @@
+query thingById($id: ID!) {
+  thingById(id: $id) {
+    id,
+    description
+  }
+}
