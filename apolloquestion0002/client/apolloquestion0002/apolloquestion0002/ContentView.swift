@@ -62,7 +62,7 @@ class AppController: ObservableObject {
         var fetchCancellable: Apollo.Cancellable?
         //print("asyncFetch called on \(Thread.current)")
         return await withTaskCancellationHandler { [fetchCancellable] in
-            fetchCancellable?.cancel()
+            fetchCancellable?.cancel() // TODO: I believe this is wrong, fetchCancellable will always be nil.  How to cancel an operation when it can't be created outside of the withCheckedContinuation closure?
         } operation: {
             return await withCheckedContinuation { continuation in
                 print("asyncFetch withCheckedContinuation called on \(Thread.current)")
@@ -91,7 +91,7 @@ class AppController: ObservableObject {
         var performCancellable: Apollo.Cancellable?
         //print("asyncPerform called on \(Thread.current)")
         return await withTaskCancellationHandler { [performCancellable] in
-            performCancellable?.cancel()
+            performCancellable?.cancel() // TODO: I believe this is wrong, performCancellable will always be nil.  How to cancel an operation when it can't be created outside of the withCheckedContinuation closure?
         } operation: {
             return await withCheckedContinuation { continuation in
                 print("asyncPerform withCheckedContinuation called on \(Thread.current)")
