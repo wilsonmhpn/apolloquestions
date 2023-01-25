@@ -5,28 +5,9 @@ import ApolloAPI
 import ApolloWebSocket
 import SwiftCodeGeneratedByApollo
 
-public class ClosureIsGoneDetector {
-    public var closureCalled = false
-    let infoString: String
-
-    init(_ infoString: String) {
-        self.infoString = infoString
-    }
-
-    deinit {
-        if !closureCalled {
-            print("deinit on \(infoString) BUT CLOSURE WAS NOT CALLED")
-        }
-        else {
-            print("deinit on \(infoString) AND CLOSURE WAS CALLED")
-        }
-    }
-}
-
 class AppController: ObservableObject {
-    @Published var resultString: String? = nil
+    @Published var showViewWithTask: Bool = false
     @Published var fetchResult: String? = nil
-    @Published var performResult: String? = nil
 
     var webSocketTransport: WebSocketTransport?
     var apolloGraphQLConn: ApolloClient?
@@ -57,58 +38,21 @@ class AppController: ObservableObject {
         webSocketTransport = connInfo.webSocketTransport
     }
 
-    //@MainActor // This *seems* to mitigate the issue - the usage of the main thread *seems* to propagate to the closure following withCheckedContinuation... is this by design or a coincidence?  In any case if all Apollo operations are initiated on the main thread, then no collision on sequence IDs should be possible
+    // TODO: Post this as a question somewhere...
+    @MainActor
     func asyncFetch() async -> String {
         var fetchCancellable: Apollo.Cancellable?
-        //print("asyncFetch called on \(Thread.current)")
         return await withTaskCancellationHandler { [fetchCancellable] in
-            fetchCancellable?.cancel() // TODO: I believe this is wrong, fetchCancellable will always be nil.  How to cancel an operation when it can't be created outside of the withCheckedContinuation closure?
+            fetchCancellable?.cancel() // TODO: This is wrong; fetchCancellable will always be nil.  How to cancel an operation when it can't be created outside of the withCheckedContinuation closure?
         } operation: {
             return await withCheckedContinuation { continuation in
-                print("asyncFetch withCheckedContinuation called on \(Thread.current)")
-                let closureIsGoneDetector = ClosureIsGoneDetector("fetchCancellable")
                 do {
                     try Task.checkCancellation()
                     fetchCancellable = self.apolloGraphQLConn?.fetch(
                         query: SwiftCodeGeneratedByApollo.ThingByIdQuery(
                             id: "does_not_matter_1")) { result in
-                                print("asyncFetch fetch closure called on \(Thread.current)")
-                                if !closureIsGoneDetector.closureCalled {
-                                    closureIsGoneDetector.closureCalled = true
-                                    continuation.resume(returning: "asyncFetch closure called")
-                                }
+                                // Deliberately not resuming the closure; we're going to cancel it
                             }
-                    print("Dump for fetchCancellable:")
-                    dump(fetchCancellable)
-                }
-                catch {}
-            }
-        }
-    }
-
-    //@MainActor // This *seems* to mitigate the issue - the usage of the main thread *seems* to propagate to the closure following withCheckedContinuation... is this by design or a coincidence?  In any case if all Apollo operations are initiated on the main thread, then no collision on sequence IDs should be possible
-    func asyncPerform() async -> String {
-        var performCancellable: Apollo.Cancellable?
-        //print("asyncPerform called on \(Thread.current)")
-        return await withTaskCancellationHandler { [performCancellable] in
-            performCancellable?.cancel() // TODO: I believe this is wrong, performCancellable will always be nil.  How to cancel an operation when it can't be created outside of the withCheckedContinuation closure?
-        } operation: {
-            return await withCheckedContinuation { continuation in
-                print("asyncPerform withCheckedContinuation called on \(Thread.current)")
-                let closureIsGoneDetector = ClosureIsGoneDetector("performCancellable")
-                do {
-                    try Task.checkCancellation()
-                    performCancellable = self.apolloGraphQLConn?.perform(
-                        mutation: SwiftCodeGeneratedByApollo.CreateThingMutation(
-                            id: "does_not_matter_2")) { result in
-                                print("asyncPerform perform closure called on \(Thread.current)")
-                                if !closureIsGoneDetector.closureCalled {
-                                    closureIsGoneDetector.closureCalled = true
-                                    continuation.resume(returning: "asyncPerform closure called")
-                                }
-                            }
-                    print("Dump for performCancellable:")
-                    dump(performCancellable)
                 }
                 catch {}
             }
@@ -120,9 +64,8 @@ class AppController: ObservableObject {
         fetchResult = await asyncFetch()
     }
 
-    @MainActor
-    func doPerform() async {
-        performResult = await asyncPerform()
+    func toggleViewWithTask() {
+        showViewWithTask = !showViewWithTask
     }
 }
 
@@ -131,25 +74,19 @@ struct ContentView: View {
     var body: some View {
         VStack {
             Spacer()
-            if let fetchResult = appController.fetchResult {
-                Text("The fetchResult is \(fetchResult)")
+            Button("Toggle view with task") {
+                appController.toggleViewWithTask()
+            }
+            if appController.showViewWithTask {
+                Text("Running task")
+                    .task {
+                        await appController.doFetch()
+                    }
             }
             else {
-                Text("The fetchResult is nil")
-            }
-            if let performResult = appController.performResult {
-                Text("The performResult is \(performResult)")
-            }
-            else {
-                Text("The performResult is nil")
+                Text("Task not running")
             }
             Spacer()
-        }
-        .task {
-            await appController.doFetch()
-        }
-        .task {
-            await appController.doPerform()
         }
         .padding()
     }
